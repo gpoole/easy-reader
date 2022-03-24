@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import styled from 'styled-components';
+import {FaPlay} from "react-icons/fa"
 
 const Wrapper = styled.div`
   width: 100%;
@@ -19,6 +20,16 @@ const CurrentText = styled.div`
   width: 900px;
   line-height: 1.4;
   text-align: center;
+`;
+
+const PlayButton = styled.div`
+  color: white;
+  font-size: 88px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 `;
 
 const trim = (str) => str.replace(/^\s*/, '').replace(/\s*$/, '');
@@ -63,6 +74,8 @@ const splitLongSentences = (sentences) => sentences.reduce((acc, sentence) => {
 }, []);
 
 const TEXT_TO_SPEAK = `
+
+
 When the last of her five children was about to fly the nest, Pam Willis wondered what she'd do with all the empty bedrooms in her house.
 
 Then, she read a news story on Facebook about seven siblings who needed a home that changed everything....
@@ -116,6 +129,7 @@ const say = (text) => {
 
 export default function Main() {
   const [currentSegment, setCurrentSegment] = useState(0);
+  const [speaking, setSpeaking] = useState(false);
 
   useEffect(() => {
     let cancel = false;
@@ -123,25 +137,39 @@ export default function Main() {
     const sayNext = async () => {
       const segment = SEGMENTS[currentSegment];
       await say(segment);
-      await sleep(isMidSentence(segment) ? 200 : 1000);
+      await sleep(isMidSentence(segment) ? 2000 : 4000);
       if (cancel) {
         return;
       }
-      setCurrentSegment(currentSegment + 1);
+
+      if (currentSegment + 1 < SEGMENTS.length) {
+        setCurrentSegment(currentSegment + 1);
+      } else {
+        setSpeaking(false);
+      }
     };
 
-    sayNext();
+    if (speaking) {
+      sayNext();
+    }
 
     return () => {
       cancel = true;
     };
-  }, [currentSegment]);
+  }, [currentSegment, speaking]);
 
   return (
     <Wrapper>
-      <CurrentText>
-        {SEGMENTS[currentSegment]}
-      </CurrentText>
+      {speaking && (
+        <CurrentText>
+          {SEGMENTS[currentSegment]}
+        </CurrentText>
+      )}
+      {!speaking && (
+        <PlayButton onClick={() => setSpeaking(true)}>
+          <FaPlay />
+        </PlayButton>
+      )}
     </Wrapper>
   );
 }
