@@ -1,6 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import styled from 'styled-components';
-import {FaPlay} from "react-icons/fa"
+import { FaPlay } from 'react-icons/fa';
+import { useLocalstorage } from 'rooks';
+import ConfigDrawer from '../components/ConfigDrawer';
+import say from '../lib/say';
 
 const Wrapper = styled.div`
   width: 100%;
@@ -165,42 +168,61 @@ Despite disabilities, they adapt to their bodies without complaint and survive w
 They are pawsome just as they are. 
 `;
 
-const SEGMENTS = splitLongSentences(toSentences(collapseWhitespace(TEXT_TO_SPEAK)));
-
 const isMidSentence = (segment) => !segment.endsWith('.');
 
 const sleep = (duration) => new Promise((resolve) => {
   setTimeout(resolve, duration);
 });
 
-const say = (text) => {
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 0.65;
-  speechSynthesis.speak(utterance);
+const DEFAULT_CONFIG = {
+  readingSpeed: 0.65,
+  textToRead: '',
+};
 
-  return new Promise((resolve) => {
-    utterance.onend = resolve;
-  });
+const useConfig = () => {
+  const [storedConfig, setStoredConfig] = useLocalstorage('config', DEFAULT_CONFIG);
+
+  const config = storedConfig || DEFAULT_CONFIG;
+
+  const setConfig = useCallback((changes) => {
+    setStoredConfig({
+      ...config,
+      ...changes,
+    });
+  }, [config, setStoredConfig]);
+
+  return { config, setConfig };
 };
 
 export default function Main() {
+  const configManager = useConfig();
+  const [textSegments, setTextSegments] = useState([]);
   const [currentSegment, setCurrentSegment] = useState(0);
   const [speaking, setSpeaking] = useState(false);
 
+  const { textToRead } = configManager.config;
+
   const nextSegment = () => {
-    if (currentSegment + 1 < SEGMENTS.length) {
+    if (currentSegment + 1 < textToRead.length) {
       setCurrentSegment(currentSegment + 1);
     } else {
       setSpeaking(false);
     }
-  }
+  };
+
+  useEffect(() => {
+    speechSynthesis.cancel();
+    setCurrentSegment(0);
+    const processedText = splitLongSentences(toSentences(collapseWhitespace(textToRead)));
+    setTextSegments(processedText);
+  }, [textToRead]);
 
   useEffect(() => {
     let cancel = false;
 
     const sayNext = async () => {
-      const segment = SEGMENTS[currentSegment];
-      await say(segment);
+      const segment = textSegments[currentSegment];
+      await say(segment, configManager.config.readingSpeed);
       await sleep(isMidSentence(segment) ? 2000 : 4000);
       if (cancel) {
         return;
@@ -215,20 +237,20 @@ export default function Main() {
     return () => {
       cancel = true;
     };
-  }, [currentSegment, speaking]);
+  }, [currentSegment, speaking, textSegments, configManager.config]);
 
   const handleTap = useCallback(() => {
     if (speaking) {
       speechSynthesis.cancel();
       nextSegment();
     }
-  }, [speaking])
+  }, [speaking]);
 
   return (
     <Wrapper onClick={handleTap}>
       {speaking && (
         <CurrentText>
-          {SEGMENTS[currentSegment]}
+          {textSegments[currentSegment]}
         </CurrentText>
       )}
       {!speaking && (
@@ -236,6 +258,7 @@ export default function Main() {
           <FaPlay />
         </PlayButton>
       )}
+      <ConfigDrawer {...configManager} />
     </Wrapper>
   );
 }
