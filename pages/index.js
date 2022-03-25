@@ -1,9 +1,12 @@
-import { useEffect, useState, useCallback } from 'react';
+/* eslint-disable no-await-in-loop */
+import {
+  useEffect, useState, useCallback, useMemo,
+} from 'react';
 import styled from 'styled-components';
 import { FaPlay } from 'react-icons/fa';
-import { useLocalstorage } from 'rooks';
+import { useSpeechSynthesis } from 'react-speech-kit';
+import { useLocalStorage } from 'react-use';
 import ConfigDrawer from '../components/ConfigDrawer';
-import say from '../lib/say';
 
 const Wrapper = styled.div`
   width: 100%;
@@ -14,7 +17,7 @@ const Wrapper = styled.div`
   justify-content: center;
 `;
 
-const CurrentText = styled.div`
+const DisplayText = styled.div`
   color: white;
   font-family: Helvetica, Arial, sans-serif;
   font-size: 80px;
@@ -25,7 +28,15 @@ const CurrentText = styled.div`
   text-align: center;
 `;
 
-const PlayButton = styled.div`
+const Unread = styled.span`
+  opacity: 0.2;
+`;
+
+const Read = styled.span`
+  opacity: 1;
+`;
+
+const PlayButton = styled.button`
   color: white;
   font-size: 88px;
   width: 100%;
@@ -33,6 +44,13 @@ const PlayButton = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
+  background: 0;
+  transition: all 200ms ease-out;
+  border: 0;
+
+  &:disabled {
+    opacity: 0.3;
+  }
 `;
 
 const trim = (str) => str.replace(/^\s*/, '').replace(/\s*$/, '');
@@ -85,12 +103,11 @@ const sleep = (duration) => new Promise((resolve) => {
 const DEFAULT_CONFIG = {
   readingSpeed: 0.65,
   textToRead: '',
+  pauseBetweenScreens: 3000,
 };
 
 const useConfig = () => {
-  const [storedConfig, setStoredConfig] = useLocalstorage('config', DEFAULT_CONFIG);
-
-  const config = storedConfig || DEFAULT_CONFIG;
+  const [config, setStoredConfig] = useLocalStorage('config', DEFAULT_CONFIG);
 
   const setConfig = useCallback((changes) => {
     setStoredConfig({
@@ -102,71 +119,89 @@ const useConfig = () => {
   return { config, setConfig };
 };
 
+function SpokenTextPrompt({ text, config, onScreenComplete }) {
+  const [markUpTo, setMarkUpTo] = useState(0);
+
+  useEffect(() => {
+    const cancel = false;
+
+    const speak = async () => {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = config.readingSpeed;
+      utterance.onboundary = (event) => {
+        if (cancel) {
+          return;
+        }
+        const boundaryStart = event.charIndex;
+        const textRemaining = text.slice(boundaryStart);
+        const foundBoundary = textRemaining.match(/[^\b]\b/)?.index;
+        const boundaryEnd = !Number.isNaN(foundBoundary) ? boundaryStart + foundBoundary : text.length;
+        setMarkUpTo(boundaryEnd + 2);
+        // console.log(event.charIndex);
+      };
+      speechSynthesis.speak(utterance);
+
+      await sleep(config.pauseBetweenScreens);
+      onScreenComplete?.();
+    };
+
+    speak();
+  }, [text, onScreenComplete]);
+
+  return (
+    <DisplayText>
+      <Read>
+        {text.slice(0, markUpTo)}
+      </Read>
+      <Unread>
+        {text.slice(markUpTo)}
+      </Unread>
+    </DisplayText>
+  );
+}
+
 export default function Main() {
   const configManager = useConfig();
-  const [textSegments, setTextSegments] = useState([]);
+  const { config } = configManager;
+  const { textToRead } = config;
   const [currentSegment, setCurrentSegment] = useState(0);
-  const [speaking, setSpeaking] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  // eslint-disable-next-line max-len
+  const textSegments = useMemo(() => splitLongSentences(toSentences(collapseWhitespace(textToRead))), [textToRead]);
 
-  const { textToRead } = configManager.config;
-
-  const nextSegment = useCallback(() => {
-    if (currentSegment + 1 < textToRead.length) {
+  const advanceNextSegment = useCallback(() => {
+    if (currentSegment + 1 < textSegments.length) {
       setCurrentSegment(currentSegment + 1);
     } else {
-      setSpeaking(false);
+      setPlaying(false);
     }
-  }, [currentSegment, textToRead]);
+  }, [currentSegment, textSegments]);
 
   useEffect(() => {
-    speechSynthesis.cancel();
     setCurrentSegment(0);
-    const processedText = splitLongSentences(toSentences(collapseWhitespace(textToRead)));
-    setTextSegments(processedText);
   }, [textToRead]);
 
-  useEffect(() => {
-    let cancel = false;
-
-    const sayNext = async () => {
-      const segment = textSegments[currentSegment];
-      await say(segment, configManager.config.readingSpeed);
-      await sleep(isMidSentence(segment) ? 2000 : 4000);
-      if (cancel) {
-        return;
-      }
-      nextSegment();
-    };
-
-    if (speaking) {
-      sayNext();
-    }
-
-    return () => {
-      cancel = true;
-    };
-  }, [currentSegment, speaking, textSegments, configManager.config, nextSegment]);
-
   const handleTap = useCallback(() => {
-    if (speaking) {
-      speechSynthesis.cancel();
-      nextSegment();
+    if (playing) {
+      advanceNextSegment();
     }
-  }, [speaking, nextSegment]);
+  }, [playing, advanceNextSegment]);
 
   return (
     <Wrapper onClick={handleTap}>
-      {speaking && (
-        <CurrentText>
-          {textSegments[currentSegment]}
-        </CurrentText>
+      {playing && (
+        <SpokenTextPrompt
+          text={textSegments[currentSegment]}
+          config={config}
+          onScreenComplete={advanceNextSegment}
+        />
       )}
-      {!speaking && (
-        <PlayButton onClick={() => setSpeaking(true)}>
+      {!playing && (
+        <PlayButton onClick={() => setPlaying(true)} disabled={!textSegments?.length}>
           <FaPlay />
         </PlayButton>
       )}
-      {!speaking && <ConfigDrawer {...configManager} />}
+      {!playing && <ConfigDrawer {...configManager} />}
     </Wrapper>
   );
 }
