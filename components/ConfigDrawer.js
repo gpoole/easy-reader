@@ -19,14 +19,14 @@ function DebugTools({ config, setConfig }) {
 
   const onChangeTextToRead = useCallback((event) => {
     setConfig({ textToRead: event.target.value });
-  }, []);
+  }, [setConfig]);
 
   const onChangeReadingSpeed = useCallback((event) => {
     const readingSpeed = event.target.value;
     setConfig({ readingSpeed });
     speechSynthesis.cancel();
     say('This is how fast I speak', readingSpeed);
-  }, []);
+  }, [setConfig]);
 
   return (
     <>

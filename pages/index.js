@@ -57,9 +57,20 @@ const trim = (str) => str.replace(/^\s*/, '').replace(/\s*$/, '');
 
 const LINES_PATTERN = /(?:\s*\r?\n\s*)+/g;
 
-const collapseWhitespace = (text) => trim(text).replace(LINES_PATTERN, '');
+const collapseWhitespace = (text) => trim(text).replace(LINES_PATTERN, ' ');
 
-const toSentences = (text) => text.split(/\.\s*/).filter(Boolean).map((sentence) => `${sentence}.`);
+const toSentences = (text) => {
+  let remaining = text;
+  const sentences = [];
+  while (remaining) {
+    const found = remaining.match(/[\.\?\!]\s/)?.index;
+    const end = found || remaining.length;
+    const sentence = remaining.slice(0, end + 1);
+    remaining = remaining.slice(end + 1);
+    sentences.push(sentence);
+  }
+  return sentences;
+};
 
 const LONG_SENTENCE = 30;
 
@@ -71,30 +82,27 @@ const splitLongSentences = (sentences) => sentences.reduce((acc, sentence) => {
     ];
   }
 
-  const splitParts = [];
-  let lastSlice = 0;
-  let nextSplitMark = 0;
-  while (sentence.length - lastSlice > LONG_SENTENCE) {
-    nextSplitMark = sentence.indexOf(',', nextSplitMark + 1);
-    if (nextSplitMark === -1) {
-      break;
+  let remaining = sentence;
+  const parts = [];
+  let offset = 0;
+  while (remaining) {
+    const found = remaining.slice(offset).match(/, /)?.index;
+    const end = found !== undefined ? (found + offset + 2) : remaining.length;
+    if (found && end < LONG_SENTENCE) {
+      offset = offset + end + 2;
+      continue;
     }
-
-    if (nextSplitMark - lastSlice >= LONG_SENTENCE) {
-      splitParts.push(trim(sentence.slice(lastSlice, nextSplitMark + 1)));
-      lastSlice = nextSplitMark + 1;
-    }
+    const part = remaining.slice(0, end);
+    parts.push(part);
+    remaining = remaining.slice(end);
+    offset = 0;
   }
-
-  splitParts.push(trim(sentence.slice(lastSlice)));
 
   return [
     ...acc,
-    ...splitParts,
+    ...parts,
   ];
 }, []);
-
-const isMidSentence = (segment) => !segment.endsWith('.');
 
 const sleep = (duration) => new Promise((resolve) => {
   setTimeout(resolve, duration);
@@ -103,7 +111,8 @@ const sleep = (duration) => new Promise((resolve) => {
 const DEFAULT_CONFIG = {
   readingSpeed: 0.65,
   textToRead: '',
-  pauseBetweenScreens: 3000,
+  pauseBetweenScreens: 1000,
+  pauseAfterSentence: 3000,
 };
 
 const useConfig = () => {
@@ -123,7 +132,7 @@ function SpokenTextPrompt({ text, config, onScreenComplete }) {
   const [markUpTo, setMarkUpTo] = useState(0);
 
   useEffect(() => {
-    const cancel = false;
+    let cancel = false;
 
     const speak = async () => {
       const utterance = new SpeechSynthesisUtterance(text);
@@ -134,18 +143,38 @@ function SpokenTextPrompt({ text, config, onScreenComplete }) {
         }
         const boundaryStart = event.charIndex;
         const textRemaining = text.slice(boundaryStart);
-        const foundBoundary = textRemaining.match(/[^\b]\b/)?.index;
-        const boundaryEnd = !Number.isNaN(foundBoundary) ? boundaryStart + foundBoundary : text.length;
-        setMarkUpTo(boundaryEnd + 2);
+        const foundBoundary = textRemaining.match(/[^\b] /)?.index;
+        const boundaryEnd = foundBoundary !== undefined ? boundaryStart + foundBoundary + 2 : text.length;
+        // It's no secret that dogs are a man's best friend. 29 49
+        setMarkUpTo(boundaryEnd);
         // console.log(event.charIndex);
       };
+
       speechSynthesis.speak(utterance);
 
-      await sleep(config.pauseBetweenScreens);
+      return new Promise((resolve) => {
+        utterance.onend = resolve;
+      });
+    };
+
+    const speakAndPause = async () => {
+      await speak();
+      const isEndOfSentence = text.endsWith('.');
+      await sleep(isEndOfSentence ? config.pauseAfterSentence : config.pauseBetweenScreens);
+
+      if (cancel) {
+        return;
+      }
+
       onScreenComplete?.();
     };
 
-    speak();
+    speakAndPause();
+
+    return () => {
+      cancel = true;
+      window.speechSynthesis.cancel();
+    };
   }, [text, onScreenComplete]);
 
   return (
@@ -173,6 +202,7 @@ export default function Main() {
     if (currentSegment + 1 < textSegments.length) {
       setCurrentSegment(currentSegment + 1);
     } else {
+      setCurrentSegment(0);
       setPlaying(false);
     }
   }, [currentSegment, textSegments]);
@@ -191,6 +221,7 @@ export default function Main() {
     <Wrapper onClick={handleTap}>
       {playing && (
         <SpokenTextPrompt
+          key={textSegments[currentSegment]}
           text={textSegments[currentSegment]}
           config={config}
           onScreenComplete={advanceNextSegment}
