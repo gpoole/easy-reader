@@ -24,6 +24,7 @@ const DisplayText = styled.div`
   font-weight: bold;
   text-shadow: 0px 0px 11px rgba(0,0,0,0.61);
   width: 900px;
+  padding: 80px;
   line-height: 1.4;
   text-align: center;
 `;
