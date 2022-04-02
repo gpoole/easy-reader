@@ -9,6 +9,10 @@ const GlobalStyle = createGlobalStyle`
     width: 100%;
     height: 100%;
   }
+
+  * {
+    box-sizing: content-box;
+  }
 `;
 
 function MyApp({ Component, pageProps }) {
