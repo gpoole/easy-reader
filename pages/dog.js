@@ -14,6 +14,7 @@ const Layout = styled.div`
 
 const SlideLayout = styled.div`
   display: flex;
+  align-items: center;
 `;
 
 const Text = styled.div`
